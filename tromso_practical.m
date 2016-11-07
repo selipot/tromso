@@ -159,11 +159,12 @@ figure
 hs = plot(fp/(2*pi),spa);
 xlog;% this is a jLab function, a short cut for set(gca,'yscale','log')
 ylog;
-legend(hs,{'x','x1','x2'});
+legend(hs,{'S_x','S_{x1}','S_{x2}'});
 title('periodogram');
 xlabel('Frequency (cpd)');ylabel('PSD (ppm^2 cpd^{-1})')
 hv = vlines((365.25*[1 0.5 4/12 1/12]).^-1);
 
+%%
 % note that you can compute the periodogram quickly using jLab mspec
 % function:
 [f,spb] = mspec(dt,[x-mx x1-m1 x2-m2],[]);
@@ -178,8 +179,9 @@ title('Periodogram');
 
 %% let's now calculate a multitaper estimate
 % define the multitaper parameters
-NW = 2; % this is the time-frequency bandwidth; it sets the bias reduction
-K = 2*NW-1; % this is a number of tapers, or windows, recommended
+NW = 3; % this is the time-frequency bandwidth; it sets the bias reduction
+        % try to vary this from 2 to many in 0.5 increments
+K = 2*NW-1; % this is a number of tapers, or windows, recommended based on NW
 % calculate the "Slepian" tapers
 psi = sleptap(N,NW,K);
 
@@ -189,6 +191,7 @@ psi = sleptap(N,NW,K);
 
 % plot the result
 f4 = figure;
+hold on
 hs = plot(f/(2*pi),sm);
 legend(hs,{'S_x','S_{x1}','S_{x2}'});
 ylabel('PSD (ppm^2 cpd^{-1})');
@@ -199,13 +202,46 @@ axis tight
 xtick(10.^(-5:0));
 ytick(10.^(-4:2:8));
 axis tight;
-hv = vlines((365.25*[40 20 10 7 4 2 1 0.5 1/3 1/12]).^-1);
+hv = vlines((365.25*[40 20 10 2 1 0.5 1/3 1/12]).^-1);
 
 %%
-% Can we estimate the annual cycle?
+% let's plot again x1 and x2 with confidence intervals
+
+% Confidence intervals for spectral estimates; 
+% see Bendat and Piersol book: as an example
+alpha = 0.05; % significance level is 100*(1-alpha)
+% need to provide values for inverse cumulative chi square function
+% for K = 5 and alpha = 0.05, chi2inv(1-alpha/2,2*K) = 20.48
+% and chi2inv(alpha/2,2*K) = 3.25
+ciK = [2*K/chi2inv(1-alpha/2,2*K) 2*K/chi2inv(alpha/2,2*K)];
+
+cc = lines(3); % this defines colors
+
+f5 = figure;
+hold on
+hs2 = patch([f(2:end) ; flipud(f(2:end))]/(2*pi),[sm(2:end,2)*ciK(1) ; flipud(sm(2:end,2)*ciK(2))],'w');
+set(hs2,'edgecolor','none','facecolor',whiten(cc(2,:)));
+hs3 = patch([f(2:end) ; flipud(f(2:end))]/(2*pi),[sm(2:end,3)*ciK(1) ; flipud(sm(2:end,3)*ciK(2))],'w');
+set(hs3,'edgecolor','none','facecolor',whiten(cc(3,:)));
+xlog;ylog;
+hs = plot(f/(2*pi),sm(:,2:3));
+set(hs(1),'color',cc(2,:),'linewidth',2);
+set(hs(2),'color',cc(3,:),'linewidth',2);
+ylabel('PSD (ppm^2 cpd^{-1})');
+xlabel('Frequency (1/day = cycle per day)');
+xtick(10.^(-5:0));
+hv = vlines((365.25*[40 20 10 2 1 0.5 1/3 1/12]).^-1);
+
+% as expected, the two spectra differ at time scales longer than 
+% please vary the number of tapers K and level alpha of confidence
+% intervals
+
+
+%%
+% Can we estimate the annual cycle from the residuals of trend?
 
 % let's try to fit sinusoidal functions
-% I wrote a simple function to estimate by least squares
+% I wrote a simple function to estimate by least squares a*cos(2 \pi f t + \phi)
 [a,phi,r2a] = xy2cos(t,x2,1./[365.25]);
 % r2a is the residual from the fit; subtract r2a from original time series to
 % get estimated sinusoidal cycle
@@ -223,6 +259,7 @@ ylog;
 xlog;
 legend(hs,{'x2','x2a','residual'});
 
+%%
 [a,phi,r2s] = xy2cos(t,x2,1./[365.25./[1 2 3]]);
 % get estimated seasonal cycle
 x2s = x2 - r2s;
@@ -243,14 +280,14 @@ xlabel('Frequency (1/day = cycle per day)');
 
 %% Filtering
 % Let's estimate the low-frequency variability by applying a smoothing
-% window. First, a theoretical interlude
+% window. First, a theoretical interlude, see extra slides
 
 % define several windows, length of 3 years
 M = round(3*365);
 w0 = ones(M,1);
-w0 = w0/sum(w0);% normalizing to one
+w0 = w0/sum(w0);% boxcar window normalizing to one
 w1 = jhanning(M);
-w1 = w1/sum(w1);% normalizing to one
+w1 = w1/sum(w1);% Hanning window normalizing to one
 
 figure;
 h = plot(1:M,[w0 w1]);
@@ -269,14 +306,14 @@ ylim(10.^[-15 -3]);
 
 %%
 % vfilt is a jLab function that conducts the convolution operation
-x2f0 = vfilt(r2s,w0,'mirror');
-x2f1 = vfilt(r2s,w1,'mirror');
+x2f0 = vfilt(x2,w0,'mirror');
+x2f1 = vfilt(x2,w1,'mirror');
 
 figure;
 hold on
 h1 = plot(t,x2);
 h2 = plot(t,[x2f0 x2f1],'linewidth',2);
-legend([h1;h2],{'x2','boxcar','hanning'},'location','best');
+legend([h1;h2],{'r2s','boxcar','hanning'},'location','best');
 
 % let's examine what happens in the spectral domain
 [f,s] = mspec(dt,[x2 x2f0 x2f1],psi);
@@ -293,6 +330,8 @@ xtick(10.^(-5:0));
 ytick(10.^(-4:2:8));
 axis tight;
 hv = vlines((M).^-1);
+
+% please vary the length M of the window
 
 %%
 % let's reconduct this operation on the time series minus seasonal cycle
@@ -327,17 +366,24 @@ hv = vlines((M).^-1);
 r2h = r2s - r2sf1;
 
 figure;
+subplot(2,1,1)
 hold on
-h1 = plot(t,[r2s r2h r2sf1]);
-set(h1(3),'linewidth',2);
-legend(h1,{'r2s','r2h','r2sf1'},'location','best');
+h1 = plot(t,[r2s r2sf1]);
+set(h1(2),'linewidth',2);
+legend(h1,{'r2s','r2sf1'},'location','best');
+xlim([0 N]);
+subplot(2,1,2)
+hold on
+h2 = plot(t,r2h,'color',cc(3,:));
+legend(h2,{'r2h'},'location','best');
+xlim([0 N]);
 
 % let's examine what happens in the spectral domain
-[f,s] = mspec(dt,[r2s r2h r2sf1],psi);
+[f,s] = mspec(dt,[r2s r2sf1 r2h],psi);
 figure;
 hold on
 hs = plot(f/(2*pi),s);
-legend(hs,{'r2s','rh2','r2sf1'});
+legend(hs,{'r2s','r2sf1','rh2'});
 ylabel('PSD (ppm^2 cpd^{-1})');
 xlabel('Frequency (1/day = cycle per day)');
 ylog;
@@ -367,6 +413,7 @@ weta = w.*[exp(1i*2*pi*[0:length(w)-1]'./p3) + exp(-1i*2*pi*[0:length(w)-1]'./p3
 figure;
 h = plot([wea wesa weta]);
 legend(h,{'Annual','Semi-annual','Tri-annual'});
+title('Filters');
 
 % "seasonal" filter
 wall = wea+wesa+weta;
@@ -375,7 +422,7 @@ x2sf = vfilt(x2,wall,'mirror');
 
 figure;
 hh = plot(t,[x2,x2sf,x2-x2sf]);
-legend(hh,{'x2','x2sf','x2sf'});
+legend(hh,{'x2','x2sf','residual'});
 
 % what is the "spectrum" of this filter?
 dum = fft([wea wesa weta wall],N,1);
@@ -390,6 +437,7 @@ xlim([0 0.5])
 vlines([1 2 3]./365.26);
 
 % but this filter is not perfect, use ylog to see this
+
 % let's examine what happens in the spectral domain
 [f,s] = mspec(dt,[x2 x2sf x2-x2sf],psi);
 figure;
